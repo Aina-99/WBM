@@ -1,0 +1,8 @@
+title: 'Contrôle Modèle'
+tooltip: >
+  Exécute l'ensemble des règles de contrôle qualité enregistrées sur le
+  modèle actif et affiche les résultats dans une fenêtre interactive.
+
+  Chaque anomalie détectée peut être affichée directement dans la vue
+  Revit via le bouton "Afficher".
+author: WBM
