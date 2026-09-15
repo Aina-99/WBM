@@ -3,10 +3,11 @@ tooltip: >
   Renseigne le parametre "Mark" des portes de la vue active selon la
   convention WBM : "{Prefixe}.{Niveau}.{NNN}".
 
-  L'ordre suit le Number des pieces liees via FromRoom. Les portes
-  partageant une meme piece, ou sans FromRoom (portes exterieures),
-  sont departagees par position geometrique (sens horaire) par
-  rapport a un repere d'entree (annotation type "M360_Entry").
+  L'ordre suit le Number des pieces liees via ToRoom (prioritaire sur
+  FromRoom). Les portes menant vers une meme piece, ou sans ToRoom
+  (portes exterieures), sont departagees par position geometrique
+  (sens horaire) par rapport a un repere d'entree que vous
+  selectionnez directement dans la vue (bouton "Choisir dans la vue").
 
   Version beta : une fenetre de previsualisation permet de verifier
   l'ordre propose avant de valider, en particulier sur les pieces

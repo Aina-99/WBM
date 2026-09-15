@@ -15,10 +15,6 @@ une vue liee a la feuille, et chaque vue liee (hors vues dont le nom
 contient "Lageplan", exclues du controle) doit contenir au moins un de
 ces identifiants.
 
-Exception "Ansichten" : si aucune vue liee ne contient "Ansichten"
-dans son nom, la feuille n'est pas controlee (ces vues ne suivent pas
-toujours cette convention de nommage).
-
 Les feuilles dont le nom contient "Vorlage" (gabarit / modele de
 feuille) sont entierement exclues de ce controle.
 """
@@ -30,7 +26,6 @@ from wbm_qc.registry import QCRule, register_rule
 
 _ALLOWED_VIEW_TYPES = ["Grundriss", "Vermietungsgrundriss", "Ansichten", "Schnitt", "JPG"]
 _SCHNITT_TYPE = "Schnitt"
-_ANSICHTEN_TYPE = "Ansichten"
 _EXCLUDED_VIEW_NAME = "Lageplan"
 _EXCLUDED_SHEET_NAME = "Vorlage"
 
@@ -112,12 +107,6 @@ class SheetNamingRule(QCRule):
                         ),
                     )
                 )
-                continue
-
-            if view_type_part == _ANSICHTEN_TYPE and not any(
-                _ANSICHTEN_TYPE in (v.Name or "") for v in checked_views
-            ):
-                # exception : pas de vue "Ansichten" liee, on ne controle pas cette feuille
                 continue
 
             for view in checked_views:

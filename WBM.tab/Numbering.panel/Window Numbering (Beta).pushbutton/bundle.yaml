@@ -1,0 +1,14 @@
+title: 'Window Numbering (Beta)'
+tooltip: >
+  Renseigne le parametre "Mark" des fenetres de la vue active selon la
+  convention WBM : "{Prefixe}.{Niveau}.{NNN}".
+
+  L'ordre suit un balayage dans le sens horaire autour du centre du
+  batiment (bounding box des murs de la vue active), en repartant du
+  repere d'entree que vous selectionnez directement dans la vue
+  (bouton "Choisir dans la vue"), pour que la fenetre 001 corresponde
+  au meme point de depart que la porte 001.
+
+  Version beta : une fenetre de previsualisation permet de verifier
+  l'ordre propose avant de valider.
+author: WBM

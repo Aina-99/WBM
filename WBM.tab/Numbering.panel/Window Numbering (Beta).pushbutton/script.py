@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Door Numbering (Beta).
+"""Window Numbering (Beta).
 
 Ouvre la fenetre de previsualisation (PreviewWindow.xaml), qui regroupe
 la saisie du prefixe et du repere d'entree, le calcul du numero "Mark"
-propose pour les portes de la vue active (voir wbm_numbering.door_numbering)
-et l'application au modele, avant d'ecrire quoi que ce soit.
+propose pour les fenetres de la vue active (voir
+wbm_numbering.window_numbering) et l'application au modele, avant
+d'ecrire quoi que ce soit.
 
 Ce script ne contient aucune logique metier : il verifie juste que la
 vue active est exploitable, puis ouvre la fenetre (preview_window).
 Pour ajuster la regle de numerotation, voir
-WBM.extension/lib/wbm_numbering/door_numbering.py.
+WBM.extension/lib/wbm_numbering/window_numbering.py.
 """
 
 from pyrevit import revit, forms, script
@@ -29,7 +30,7 @@ level = view.GenLevel
 if level is None:
     forms.alert(
         "La vue active '{}' n'est pas associee a un niveau. Ouvrez une "
-        "vue en plan pour numeroter ses portes.".format(view.Name),
+        "vue en plan pour numeroter ses fenetres.".format(view.Name),
         exitscript=True,
     )
 

@@ -3,28 +3,41 @@
 
 Convention WBM : "{Prefixe}.{Niveau}.{NNN}" (ex. "T.EG00.001").
 
-L'ordre suit trois regles, deduites de l'analyse d'un cas reel (voir
+L'ordre suit quatre regles, deduites de l'analyse d'un cas reel (voir
 Numbering.panel/Door Numbering (Beta).pushbutton) :
 
-1. Les portes ayant une piece FromRoom sont regroupees par piece et
+0. La porte la plus proche (a vol d'oiseau) du repere d'entree devient
+   toujours le rang 1, quelle que soit la position que les regles
+   suivantes lui auraient donnee : c'est la porte qu'on franchit en
+   premier en entrant dans le batiment.
+1. Les portes ayant une piece ToRoom sont regroupees par piece et
    ordonnees selon le Number de cette piece (croissant) : la
    numerotation des portes suit ainsi l'ordre de circulation deja
    encode par la numerotation des pieces, sans avoir a le redeviner.
-2. Quand plusieurs portes partent de la meme piece, l'egalite est
+   ToRoom prime sur FromRoom : une porte est rattachee a la piece vers
+   laquelle elle mene, pas a celle dont elle part.
+2. Quand plusieurs portes menent vers la meme piece, l'egalite est
    departagee en balayant le sens horaire autour du centre de CETTE
-   piece, en repartant de la porte precedemment numerotee (et non d'un
-   angle absolu depuis un point unique) : un pivot global deforme le
-   sens horaire par effet de perspective pour les pieces eloignees.
-3. Les portes sans FromRoom (portes exterieures) sont inserees juste
-   avant le groupe de portes de leur ToRoom, puisqu'elles jouent le
-   meme role qu'une porte "depuis" cette piece.
+   piece, en repartant d'une reference de sortie de la piece : la
+   porte par laquelle on en ressort reellement (FromRoom == cette
+   piece) quand elle est unique dans tout le jeu de portes -- la
+   reference la plus fiable, independante de l'ordre de traitement des
+   groupes -- sinon le point d'entree choisi par l'utilisateur (voir
+   regle 3).
+3. Les portes sans ToRoom (portes menant vers l'exterieur) sont
+   inserees juste avant le groupe de portes de leur FromRoom,
+   puisqu'elles jouent le meme role qu'une porte "vers" cette piece.
 
-Pour les pieces sans porte entrante identifiable (aucune, ou plusieurs
-candidates pas encore numerotees), il n'existe pas de reference
-geometrique fiable : la regle 2 retombe alors sur la continuation de
-la sequence globale (le dernier point numerote), qui reste deterministe
-mais peut ne pas correspondre a l'intuition visuelle. Verifiez toujours
-la previsualisation avant d'appliquer, en particulier sur ces pieces.
+Le point d'entree choisi par l'utilisateur (voir
+preview_window.on_pick_entry_click) ne sert donc que de repli pour la
+regle 2, et seulement pour les pieces sans porte de sortie identifiable
+de façon unique -- typiquement une piece a plusieurs sorties possibles,
+ou aucune porte n'en ressort explicitement dans les donnees. Pour les
+autres pieces (l'immense majorite), le repere choisi n'a aucun effet
+visible : c'est attendu, la reference physique reelle prime toujours
+sur un point choisi a la main. Verifiez toujours la previsualisation
+avant d'appliquer (et reordonnez manuellement au besoin, par
+glisser-deposer dans le tableau) sur les pieces concernees.
 """
 
 import math
@@ -36,6 +49,8 @@ from Autodesk.Revit.DB import (
     FilteredElementCollector,
     Transaction,
 )
+
+from wbm_numbering.revit_context import SwallowWarnings
 
 _TRAILING_DIGITS = re.compile(r"(\d+)\s*$")
 
@@ -77,11 +92,29 @@ def room_center(room):
     return None
 
 
-def door_location(door):
-    loc = door.Location
+def element_point(element):
+    """Position (x, y) representative d'un element quelconque : son point
+    d'implantation, sinon le milieu de sa courbe d'implantation, sinon le
+    centre de sa bounding box.
+
+    Generique a dessein : sert aussi bien aux portes qu'a l'element
+    repere d'entree choisi par l'utilisateur (une annotation, mais aussi
+    potentiellement un mur, une porte, une pièce...).
+    """
+    loc = getattr(element, "Location", None)
     if loc is not None and hasattr(loc, "Point") and loc.Point:
         return (loc.Point.X, loc.Point.Y)
+    if loc is not None and hasattr(loc, "Curve") and loc.Curve:
+        mid = loc.Curve.Evaluate(0.5, True)
+        return (mid.X, mid.Y)
+    bbox = element.get_BoundingBox(None)
+    if bbox:
+        return ((bbox.Min.X + bbox.Max.X) / 2.0, (bbox.Min.Y + bbox.Max.Y) / 2.0)
     return None
+
+
+def _distance(point_a, point_b):
+    return math.hypot(point_a[0] - point_b[0], point_a[1] - point_b[1])
 
 
 def clockwise_angle(point, center):
@@ -91,35 +124,6 @@ def clockwise_angle(point, center):
     dy = point[1] - center[1]
     angle = math.degrees(math.atan2(dx, dy))
     return angle + 360.0 if angle < 0 else angle
-
-
-def find_entry_point(doc, view, name_contains="M360_Entry"):
-    """Cherche, parmi les elements visibles dans `view`, une annotation
-    dont le Name contient `name_contains`, et retourne sa position
-    (x, y).
-
-    Retourne None si aucune instance implantee ne correspond ; les
-    appelants doivent alors se rabattre sur un comportement degrade
-    (voir build_order).
-    """
-    collector = FilteredElementCollector(doc, view.Id).WhereElementIsNotElementType()
-    candidates = []
-    for element in collector:
-        try:
-            name = element.Name
-        except Exception:
-            continue
-        if not name or name_contains not in name:
-            continue
-        loc = element.Location
-        if loc is not None and hasattr(loc, "Point") and loc.Point:
-            candidates.append((element, (loc.Point.X, loc.Point.Y)))
-    if not candidates:
-        return None
-    # Si plusieurs correspondances (ex. "M360_Entry" et "M360_Entry 2"),
-    # on privilegie le nom le plus specifique (le plus long).
-    candidates.sort(key=lambda c: len(c[0].Name))
-    return candidates[-1][1]
 
 
 def collect_doors(doc, view):
@@ -139,16 +143,32 @@ def collect_doors(doc, view):
     for door in collector:
         from_room = door.FromRoom[phase] if phase else None
         to_room = door.ToRoom[phase] if phase else None
-        doors.append(DoorInfo(door, door_location(door), from_room, to_room))
+        doors.append(DoorInfo(door, element_point(door), from_room, to_room))
     return doors
 
 
+def _exit_reference(room_id, all_doors, entry_point):
+    """Reference de sortie de la piece `room_id` : la porte par laquelle
+    on en ressort reellement (FromRoom == room_id), quand elle est
+    unique -- la direction physiquement correcte. Repli sur
+    `entry_point` quand aucune porte n'en ressort, ou que plusieurs s'y
+    pretent (impossible de trancher sans ambiguite a partir des seules
+    donnees FromRoom/ToRoom).
+    """
+    outbound = [
+        d for d in all_doors
+        if d.from_room is not None and d.from_room.Id.IntegerValue == room_id
+    ]
+    if len(outbound) == 1:
+        return outbound[0].location
+    return entry_point
+
+
 def _sweep_clockwise(group, pivot, start_point):
-    """Ordonne `group` (portes partageant un meme FromRoom) en sautant,
+    """Ordonne `group` (portes partageant un meme ToRoom) en sautant,
     a chaque etape, vers la porte restante la plus proche dans le sens
     horaire autour de `pivot`, en repartant de `start_point` (la
-    derniere porte numerotee, ou le point d'entree pour le tout premier
-    groupe)."""
+    reference de sortie de la piece, voir _exit_reference)."""
     remaining = list(group)
     ordered = []
     reference = start_point
@@ -165,37 +185,46 @@ def _sweep_clockwise(group, pivot, start_point):
 
 def build_order(doors, entry_point):
     """Retourne `doors` reordonnees selon la convention WBM (voir le
-    docstring du module)."""
-    with_room = [d for d in doors if d.from_room is not None]
-    without_room = [d for d in doors if d.from_room is None]
+    docstring du module). ToRoom prime sur FromRoom (voir regle 1)."""
+    with_room = [d for d in doors if d.to_room is not None]
+    without_room = [d for d in doors if d.to_room is None]
 
     groups = {}
     for d in with_room:
-        groups.setdefault(d.from_room.Id.IntegerValue, []).append(d)
+        groups.setdefault(d.to_room.Id.IntegerValue, []).append(d)
 
     group_order = sorted(
-        groups.keys(), key=lambda rid: room_number_key(groups[rid][0].from_room)
+        groups.keys(), key=lambda rid: room_number_key(groups[rid][0].to_room)
     )
 
     ordered = []
-    reference_point = entry_point
     for room_id in group_order:
         group = groups[room_id]
-        pivot = room_center(group[0].from_room) or reference_point or group[0].location
-        if reference_point is None:
-            reference_point = pivot
-        placed = _sweep_clockwise(group, pivot, reference_point)
+        pivot = room_center(group[0].to_room) or group[0].location
+        reference = _exit_reference(room_id, doors, entry_point) or pivot
+        placed = _sweep_clockwise(group, pivot, reference)
         ordered.extend(placed)
-        reference_point = placed[-1].location or reference_point
 
     for door in without_room:
-        target_number = room_number_key(door.to_room)
+        target_number = room_number_key(door.from_room)
         insert_at = len(ordered)
         for i, placed_door in enumerate(ordered):
-            if room_number_key(placed_door.from_room) >= target_number:
+            # Les portes deja inserees sans ToRoom ont une cle infinie : les
+            # comparer ferait remonter chaque nouvelle porte exterieure juste
+            # devant la precedente, donc en tete de liste.
+            if placed_door.to_room is None:
+                continue
+            if room_number_key(placed_door.to_room) >= target_number:
                 insert_at = i
                 break
         ordered.insert(insert_at, door)
+
+    candidates = [d for d in ordered if d.location is not None]
+    if entry_point is not None and candidates:
+        closest = min(candidates, key=lambda d: _distance(d.location, entry_point))
+        if ordered[0] is not closest:
+            ordered.remove(closest)
+            ordered.insert(0, closest)
 
     return ordered
 
@@ -210,9 +239,17 @@ def assign_marks(ordered_doors, prefix, level_name, digits=3, start=1):
 
 def apply_marks(doc, ordered_doors, transaction_name="Door Mark numbering"):
     """Ecrit door.mark dans le parametre Mark de chaque porte, dans une
-    transaction unique."""
+    transaction unique.
+
+    A n'appeler que depuis un contexte API Revit valide : depuis une
+    fenetre non modale, passer par wbm_numbering.revit_context.
+    """
     t = Transaction(doc, transaction_name)
     t.Start()
+    options = t.GetFailureHandlingOptions()
+    options.SetFailuresPreprocessor(SwallowWarnings())
+    options.SetForcedModalHandling(False)
+    t.SetFailureHandlingOptions(options)
     try:
         for door in ordered_doors:
             param = door.element.get_Parameter(BuiltInParameter.ALL_MODEL_MARK)

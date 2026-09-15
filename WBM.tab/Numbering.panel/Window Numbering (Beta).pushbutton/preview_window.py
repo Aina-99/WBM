@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Code-behind de la fenetre de previsualisation Door Numbering (Beta).
+"""Code-behind de la fenetre de previsualisation Window Numbering (Beta).
 
 L'interface (PreviewWindow.xaml) reste entierement definie en XAML,
 conformement a la regle du projet : ce module ne fait que la piloter
@@ -25,15 +25,16 @@ from Autodesk.Revit.Exceptions import OperationCanceledException
 
 from pyrevit import forms
 
-from wbm_numbering.door_numbering import (
+from wbm_numbering.door_numbering import element_point
+from wbm_numbering.window_numbering import (
+    building_center,
     build_order,
     assign_marks,
     apply_marks,
-    collect_doors,
-    element_point,
+    collect_windows,
 )
 
-_DRAG_FORMAT = "WBM.DoorNumbering.Row"
+_DRAG_FORMAT = "WBM.WindowNumbering.Row"
 
 # Hauteur de la zone haute/basse du tableau qui declenche le defilement
 # automatique pendant un glisser-deposer.
@@ -70,20 +71,18 @@ def _find_descendant(element, descendant_type):
     return None
 
 
-class DoorRowVM(object):
+class WindowRowVM(object):
     """Objet expose au binding WPF pour une ligne de la previsualisation."""
 
-    def __init__(self, rank, door):
-        self.door = door
+    def __init__(self, rank, window):
+        self.window = window
         self.Rank = rank
-        self.Mark = door.mark
-        self.Id = door.element.Id.IntegerValue
-        self.ToRoom = door.to_room.Number if door.to_room else "(exterieur)"
-        self.FromRoom = door.from_room.Number if door.from_room else "-"
-        self.element_id = door.element.Id
+        self.Mark = window.mark
+        self.Id = window.element.Id.IntegerValue
+        self.element_id = window.element.Id
 
 
-class DoorNumberingPreviewWindow(forms.WPFWindow):
+class WindowNumberingPreviewWindow(forms.WPFWindow):
     def __init__(self, xaml_file, doc, uidoc, view, api_runner):
         forms.WPFWindow.__init__(self, xaml_file)
         self.doc = doc
@@ -91,7 +90,7 @@ class DoorNumberingPreviewWindow(forms.WPFWindow):
         self.view = view
         self.api_runner = api_runner
         self.level = view.GenLevel
-        self.ordered_doors = []
+        self.ordered_windows = []
         self.rows = []
         self.entry_point = None
         self._drag_candidate = None
@@ -148,32 +147,38 @@ class DoorNumberingPreviewWindow(forms.WPFWindow):
             forms.alert("Merci de saisir un prefixe de numerotation.")
             return
 
-        doors = collect_doors(self.doc, self.view)
-        if not doors:
-            self.ordered_doors = []
+        windows = collect_windows(self.doc, self.view)
+        if not windows:
+            self.ordered_windows = []
             self.rows = []
             self.grid_preview.ItemsSource = self.rows
-            self.lbl_status.Text = "Aucune porte trouvee dans la vue active."
+            self.lbl_status.Text = "Aucune fenetre trouvee dans la vue active."
             return
 
-        ordered = build_order(doors, self.entry_point)
+        pivot = building_center(self.doc, self.view)
+        ordered = build_order(windows, pivot, self.entry_point)
         assign_marks(ordered, prefix, self.level.Name)
 
-        self.ordered_doors = ordered
+        self.ordered_windows = ordered
         self._refresh_rows()
 
-        status = "{} porte(s) a numeroter. Verifiez l'ordre avant de valider, " \
-            "en particulier les pieces a plusieurs portes.".format(len(self.rows))
-        if self.entry_point is None:
-            status += " Aucun repere d'entree selectionne : portes sans ToRoom " \
-                "positionnees sans reference geometrique d'entree."
+        status = "{} fenetre(s) a numeroter. Verifiez l'ordre avant de valider.".format(
+            len(self.rows)
+        )
+        if pivot is None:
+            status += (
+                " Centre du batiment introuvable (aucun mur dans la vue, ni"
+                " CropBox) : ordre non calcule."
+            )
+        elif self.entry_point is None:
+            status += " Aucun repere d'entree selectionne : depart pris au nord."
         self.lbl_status.Text = status
 
     # ------------------------------------------------------------------
     # Reordonnancement manuel (glisser-deposer)
     # ------------------------------------------------------------------
     def _refresh_rows(self, select_index=None):
-        self.rows = [DoorRowVM(i + 1, d) for i, d in enumerate(self.ordered_doors)]
+        self.rows = [WindowRowVM(i + 1, w) for i, w in enumerate(self.ordered_windows)]
         self.grid_preview.ItemsSource = self.rows
         if select_index is not None and 0 <= select_index < len(self.rows):
             self.grid_preview.SelectedItem = self.rows[select_index]
@@ -232,14 +237,14 @@ class DoorNumberingPreviewWindow(forms.WPFWindow):
         if source_row is target_row:
             return
         try:
-            src_idx = self.ordered_doors.index(source_row.door)
-            dst_idx = self.ordered_doors.index(target_row.door)
+            src_idx = self.ordered_windows.index(source_row.window)
+            dst_idx = self.ordered_windows.index(target_row.window)
         except ValueError:
             return
-        door = self.ordered_doors.pop(src_idx)
-        self.ordered_doors.insert(dst_idx, door)
+        window = self.ordered_windows.pop(src_idx)
+        self.ordered_windows.insert(dst_idx, window)
         prefix = (self.txt_prefix.Text or "").strip() or "T"
-        assign_marks(self.ordered_doors, prefix, self.level.Name)
+        assign_marks(self.ordered_windows, prefix, self.level.Name)
         self._refresh_rows(select_index=dst_idx)
 
     # ------------------------------------------------------------------
@@ -267,12 +272,12 @@ class DoorNumberingPreviewWindow(forms.WPFWindow):
             pass
 
     def on_apply_click(self, sender, args):
-        if not self.ordered_doors:
+        if not self.ordered_windows:
             forms.alert("Rien a appliquer : calculez d'abord une previsualisation valide.")
             return
         confirmed = forms.alert(
             "Appliquer les {} valeurs Mark proposees au modele ?".format(
-                len(self.ordered_doors)
+                len(self.ordered_windows)
             ),
             yes=True,
             no=True,
@@ -286,13 +291,13 @@ class DoorNumberingPreviewWindow(forms.WPFWindow):
 
     def _apply_in_context(self, uiapp):
         try:
-            apply_marks(self.doc, self.ordered_doors)
+            apply_marks(self.doc, self.ordered_windows)
         except Exception as ex:
             self.lbl_status.Text = "Echec de l'application : {}".format(ex)
             forms.alert("Echec de l'application des Mark :\n{}".format(ex))
             return
-        self.lbl_status.Text = "Mark applique sur {} porte(s).".format(
-            len(self.ordered_doors)
+        self.lbl_status.Text = "Mark applique sur {} fenetre(s).".format(
+            len(self.ordered_windows)
         )
 
     def on_close_click(self, sender, args):
@@ -302,6 +307,6 @@ class DoorNumberingPreviewWindow(forms.WPFWindow):
 def show_preview_window(doc, uidoc, view, api_runner):
     """Cree et affiche la fenetre de previsualisation (non modale)."""
     xaml_file = os.path.join(os.path.dirname(__file__), "PreviewWindow.xaml")
-    window = DoorNumberingPreviewWindow(xaml_file, doc, uidoc, view, api_runner)
+    window = WindowNumberingPreviewWindow(xaml_file, doc, uidoc, view, api_runner)
     window.Show()
     return window
