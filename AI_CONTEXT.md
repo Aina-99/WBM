@@ -63,6 +63,21 @@ Règles implémentées (`lib/wbm_qc/rules/`) :
     chaque vue liée (hors vues contenant `Lageplan`) doit contenir au moins
     un identifiant
   - Feuilles contenant `Vorlage` exclues de tout contrôle
+- Chevauchement des tags (`rule_tag_overlap.py`, ajouté le 2026-09-17) :
+  l'étiquette des tags pièce/porte/fenêtre ne doit chevaucher ni un mur ni
+  un contour de pièce, dans les vues en plan "Grundriss". Une anomalie par
+  tag (pour pouvoir "Afficher" chacun). Points clés validés en test :
+  - Ne pas utiliser la bbox brute du tag : elle inclut la ligne de rappel.
+    Les leaders sont retirés dans une transaction **toujours annulée**
+  - Sans leader, Revit ramène un RoomTag sur le point de la pièce : la boîte
+    est recalée de (TagHeadPosition − Location.Point). Pas le cas des
+    IndependentTag (portes/fenêtres)
+  - La largeur de la bbox d'un RoomTag correspond déjà au texte réel
+    (mesuré à 0,1 mm près) : inutile de recalculer une largeur dynamique
+  - Murs : coupe réelle du solide au plan de coupe de la vue
+    (`CutWithHalfSpace`), pas l'axe + épaisseur
+  - Comme la règle ouvre une transaction, "Relancer" et "Afficher" de la
+    fenêtre ModelCheck passent par `ApiContextRunner` (ExternalEvent)
 - Contrôle Dynamo : vérifier que le script a tourné sur **toutes** les pièces
   (pas juste respecter une marge d'erreur)
 

@@ -48,10 +48,11 @@ class IssueRowVM(object):
 
 
 class QCResultsWindow(forms.WPFWindow):
-    def __init__(self, xaml_file, doc, uidoc, issues, rule_errors=None):
+    def __init__(self, xaml_file, doc, uidoc, api_runner, issues, rule_errors=None):
         forms.WPFWindow.__init__(self, xaml_file)
         self.doc = doc
         self.uidoc = uidoc
+        self.api_runner = api_runner
         self.all_rows = []
         self._loading_filters = False
         self.load_issues(issues, rule_errors)
@@ -134,6 +135,8 @@ class QCResultsWindow(forms.WPFWindow):
     # ------------------------------------------------------------------
     # Actions utilisateur
     # ------------------------------------------------------------------
+    # Fenetre non modale : tout appel a l'API Revit passe par l'ExternalEvent
+    # (voir wbm_numbering.revit_context).
     def on_show_click(self, sender, args):
         row = sender.Tag
         issue = row.issue if row else None
@@ -142,15 +145,21 @@ class QCResultsWindow(forms.WPFWindow):
             forms.alert("Aucun element Revit n'est associe a cette anomalie.")
             return
 
+        element_id = issue.element_id
+        self.api_runner.run(lambda uiapp: self._show_in_context(element_id))
+
+    def _show_in_context(self, element_id):
         try:
-            ids = List[ElementId]([issue.element_id])
-            self.uidoc.Selection.SetElementIds(ids)
-            self.uidoc.ShowElements(issue.element_id)
+            self.uidoc.Selection.SetElementIds(List[ElementId]([element_id]))
+            self.uidoc.ShowElements(element_id)
         except Exception as ex:
             forms.alert("Impossible d'afficher l'element : {}".format(ex))
 
     def on_rerun_click(self, sender, args):
         self.lbl_status.Text = "Controle en cours..."
+        self.api_runner.run(self._rerun_in_context)
+
+    def _rerun_in_context(self, uiapp):
         issues, rule_errors = run_checks(self.doc)
         self.load_issues(issues, rule_errors)
 
@@ -178,9 +187,9 @@ class QCResultsWindow(forms.WPFWindow):
         self.Close()
 
 
-def show_results_window(doc, uidoc, issues, rule_errors=None):
+def show_results_window(doc, uidoc, api_runner, issues, rule_errors=None):
     """Cree et affiche la fenetre de resultats (non modale)."""
     xaml_file = os.path.join(os.path.dirname(__file__), "ResultsWindow.xaml")
-    window = QCResultsWindow(xaml_file, doc, uidoc, issues, rule_errors)
+    window = QCResultsWindow(xaml_file, doc, uidoc, api_runner, issues, rule_errors)
     window.Show()
     return window

@@ -13,6 +13,7 @@ ajouter un nouveau controle, voir WBM.extension/lib/wbm_qc/rules/.
 from pyrevit import revit, forms, script
 
 from wbm_qc.engine import run_checks
+from wbm_numbering.revit_context import ApiContextRunner
 
 from results_window import show_results_window
 
@@ -30,4 +31,8 @@ if rule_errors:
     for rule_name, message in rule_errors:
         print(" - {} : {}".format(rule_name, message))
 
-show_results_window(doc, uidoc, issues, rule_errors)
+# Doit etre cree ici : ExternalEvent.Create exige un contexte API valide,
+# que la fenetre non modale n'a plus une fois ce script termine.
+api_runner = ApiContextRunner()
+
+show_results_window(doc, uidoc, api_runner, issues, rule_errors)
