@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Controle : le nom du fichier Revit doit respecter la convention WBM
-"{18 chiffres numero de projet}_{YYMMDD date}.rvt".
+"{18 chiffres numero de projet}_{YYYYMMDD date}.rvt".
 
 Les autres controles (numero de projet, date d'emission) s'appuient
 sur ce meme parsing : si le nom de fichier est invalide, ils ne
@@ -21,7 +21,7 @@ class FilenameConventionRule(QCRule):
     severity = SEVERITY_ERROR
     description = (
         "Verifie que le nom du fichier respecte la convention WBM : "
-        "'{18 chiffres numero de projet}_{YYMMDD date}.rvt'."
+        "'{18 chiffres numero de projet}_{YYYYMMDD date}.rvt'."
     )
 
     def check(self, doc):
@@ -38,7 +38,7 @@ class FilenameConventionRule(QCRule):
                 severity=self.severity,
                 description=(
                     "Renommer '{}' : format attendu "
-                    "'{{18 chiffres}}_{{YYMMDD}}'.".format(doc.Title)
+                    "'{{18 chiffres}}_{{YYYYMMDD}}'.".format(doc.Title)
                 ),
             )
         ]

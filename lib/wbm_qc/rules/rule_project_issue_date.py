@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Controle : le parametre "Project Issue Date" (format YYYYMMDD) doit
 correspondre a la date du jour et a la date du nom de fichier (format
-YYMMDD, convention WBM : "{18 chiffres}_{YYMMDD}.rvt")."""
+YYYYMMDD, convention WBM : "{18 chiffres}_{YYYYMMDD}.rvt")."""
 
 import datetime
 
@@ -20,7 +20,7 @@ class ProjectIssueDateRule(QCRule):
     severity = SEVERITY_ERROR
     description = (
         "Project Issue Date (YYYYMMDD) doit correspondre a la date du "
-        "jour et a la date du nom de fichier (YYMMDD)."
+        "jour et a la date du nom de fichier (YYYYMMDD)."
     )
 
     def check(self, doc):
@@ -29,8 +29,7 @@ class ProjectIssueDateRule(QCRule):
         issue_date = (param.AsString() or "").strip() if param else ""
 
         today_full = datetime.date.today().strftime("%Y%m%d")
-        _, filename_date = parse_project_filename(doc)
-        filename_date_full = ("20" + filename_date) if filename_date else None
+        _, filename_date_full = parse_project_filename(doc)
 
         values = {
             "Project Issue Date": issue_date or "vide",
