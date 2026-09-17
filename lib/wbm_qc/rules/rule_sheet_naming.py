@@ -5,10 +5,9 @@ les vues effectivement placees sur la feuille.
 Types de vue autorises : Grundriss, Vermietungsgrundriss, Ansichten,
 Schnitt.
 
-- Pour "Schnitt" : la partie "Libre" liste les identifiants separes
-  par "_" (ex : "Schnitt - A-A_B-B").
-- Pour les autres types : la partie "Libre" liste les identifiants
-  separes par "," (ex : "Grundriss - EG,OG1").
+La partie "Libre" liste les identifiants separes par "," pour tous les
+types de vue, y compris "Schnitt" (ex : "Schnitt - A-A,B-B",
+"Grundriss - EG,OG1").
 
 Chaque identifiant de "Libre" doit se retrouver dans le nom d'au moins
 une vue liee a la feuille, et chaque vue liee (hors vues dont le nom
@@ -25,7 +24,6 @@ from wbm_qc.models import QCIssue, SEVERITY_ERROR
 from wbm_qc.registry import QCRule, register_rule
 
 _ALLOWED_VIEW_TYPES = ["Grundriss", "Vermietungsgrundriss", "Ansichten", "Schnitt", "JPG"]
-_SCHNITT_TYPE = "Schnitt"
 _EXCLUDED_VIEW_NAME = "Lageplan"
 _EXCLUDED_SHEET_NAME = "Vorlage"
 
@@ -84,8 +82,7 @@ class SheetNamingRule(QCRule):
                 )
                 continue
 
-            separator = "_" if view_type_part == _SCHNITT_TYPE else ","
-            tokens = [t.strip() for t in niveau_part.split(separator) if t.strip()]
+            tokens = [t.strip() for t in niveau_part.split(",") if t.strip()]
 
             placed_view_ids = sheet.GetAllPlacedViews()
             placed_views = [
