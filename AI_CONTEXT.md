@@ -49,13 +49,19 @@ Règles implémentées (`lib/wbm_qc/rules/`) :
   - WindowTag : famille imposée `M360_Window tag V2`
 - Cohérence largeur × hauteur des pièces vs `area` (tolérance ±2 m², idéalement
   via bounding box en Groundfloor pour réduire la marge d'erreur)
-- Liens feuilles/vues + nommage :
-  - Nom de feuille : `Type de vue - Niveau`
-  - Types de vue autorisés : `Grundriss`, `Vermietungsgrundriss`, `Ansichten`, `Schnitt`
-  - Le niveau doit correspondre aux vues liées ; plusieurs vues séparées par
-    virgule, sauf `Schnitt` séparé par underscore (ex : `A-A_B-B`)
-  - Toutes les vues doivent contenir `Schnitt` + `A-A`/`B-B` (ou équivalent),
-    sauf celles contenant `Lageplan`
+- Liens feuilles/vues + nommage (`rule_sheet_naming.py`) :
+  - Nom de feuille : `Type de vue - Libre`
+  - Types de vue autorisés : `Grundriss`, `Vermietungsgrundriss`, `Ansichten`, `Schnitt`, `JPG`
+  - Les identifiants de la partie "Libre" sont **toujours séparés par une
+    virgule**, y compris pour `Schnitt` (ex : `Schnitt - A-A,B-B`,
+    `Grundriss - EG,OG1`). *Correction du 2026-09-17* : l'ancienne règle
+    imposait un underscore pour `Schnitt`, mais les feuilles réelles du
+    projet utilisent la virgule comme tous les autres types — la règle a été
+    alignée sur l'usage réel (vérifié en direct sur la feuille A2.004 du doc
+    actif Revit).
+  - Chaque identifiant doit se retrouver dans au moins une vue liée, et
+    chaque vue liée (hors vues contenant `Lageplan`) doit contenir au moins
+    un identifiant
   - Feuilles contenant `Vorlage` exclues de tout contrôle
 - Contrôle Dynamo : vérifier que le script a tourné sur **toutes** les pièces
   (pas juste respecter une marge d'erreur)
