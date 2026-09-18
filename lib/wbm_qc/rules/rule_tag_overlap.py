@@ -6,6 +6,11 @@ piece, dans les vues en plan dont le nom contient "Grundriss".
 Seule l'etiquette compte, pas la ligne de rappel : les boites sont lues
 leaders retires, dans une transaction toujours annulee. Doit donc
 tourner dans un contexte API Revit valide.
+
+Le chevauchement est mesure (part de l'etiquette recouverte par un mur,
+longueur de contour traversant l'etiquette) et non par simple contact :
+la boite d'un tag depasse legerement ses lettres, donc un contact strict
+remonte surtout des frolements invisibles a l'impression.
 """
 
 from Autodesk.Revit.DB import (
@@ -34,51 +39,83 @@ _VIEW_NAME_FILTER = "Grundriss"
 _DEFAULT_CUT_OFFSET_FT = 4.0
 _EPS = 1e-9
 
-
-def _cross(o, a, b):
-    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
-
-
-def _segments_cross(p1, p2, p3, p4):
-    d1 = _cross(p3, p4, p1)
-    d2 = _cross(p3, p4, p2)
-    d3 = _cross(p1, p2, p3)
-    d4 = _cross(p1, p2, p4)
-    return ((d1 > 0 > d2) or (d1 < 0 < d2)) and ((d3 > 0 > d4) or (d3 < 0 < d4))
+# Part minimale de l'etiquette recouverte par un mur pour signaler le tag.
+_MIN_OVERLAP_RATIO = 0.02
+# Longueur minimale (mm sur le papier) d'un contour traversant l'etiquette.
+_MIN_CONTOUR_MM = 3.0
+_MM_PER_FT = 304.8
 
 
-def _point_in_rect(p, rect):
-    return rect[0] <= p[0] <= rect[2] and rect[1] <= p[1] <= rect[3]
+def _clip_to_rect(poly, rect):
+    """Partie du polygone contenue dans le rectangle (Sutherland-Hodgman).
+    L'orientation est conservee : les trous restent soustractifs."""
+    bounds = ((0, rect[0], True), (0, rect[2], False), (1, rect[1], True), (1, rect[3], False))
+    for axis, value, keep_greater in bounds:
+        if not poly:
+            return []
+        clipped = []
+        for index in range(len(poly)):
+            current = poly[index]
+            previous = poly[index - 1]
+            current_in = current[axis] >= value if keep_greater else current[axis] <= value
+            previous_in = previous[axis] >= value if keep_greater else previous[axis] <= value
+            if current_in != previous_in:
+                span = current[axis] - previous[axis]
+                ratio = (value - previous[axis]) / span if abs(span) > _EPS else 0.0
+                clipped.append(
+                    (
+                        previous[0] + (current[0] - previous[0]) * ratio,
+                        previous[1] + (current[1] - previous[1]) * ratio,
+                    )
+                )
+            if current_in:
+                clipped.append(current)
+        poly = clipped
+    return poly
 
 
-def _segment_hits_rect(p1, p2, rect):
-    if _point_in_rect(p1, rect) or _point_in_rect(p2, rect):
-        return True
-    corners = [(rect[0], rect[1]), (rect[2], rect[1]), (rect[2], rect[3]), (rect[0], rect[3])]
-    return any(_segments_cross(p1, p2, corners[i], corners[(i + 1) % 4]) for i in range(4))
+def _signed_area(poly):
+    if len(poly) < 3:
+        return 0.0
+    total = 0.0
+    for index in range(len(poly)):
+        x1, y1 = poly[index]
+        x2, y2 = poly[(index + 1) % len(poly)]
+        total += x1 * y2 - x2 * y1
+    return total / 2.0
 
 
-def _point_in_loops(point, loops):
-    x, y = point
-    inside = False
-    for poly in loops:
-        j = len(poly) - 1
-        for i in range(len(poly)):
-            xi, yi = poly[i]
-            xj, yj = poly[j]
-            if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
-                inside = not inside
-            j = i
-    return inside
+def _overlap_area(rect, loops):
+    return abs(sum(_signed_area(_clip_to_rect(poly, rect)) for poly in loops))
 
 
-def _rect_hits_loops(rect, loops):
-    for poly in loops:
-        for i in range(len(poly)):
-            if _segment_hits_rect(poly[i], poly[(i + 1) % len(poly)], rect):
-                return True
-    center = ((rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0)
-    return _point_in_loops(center, loops)
+def _segment_length_in_rect(p1, p2, rect):
+    """Longueur de la portion de segment contenue dans le rectangle
+    (decoupage de Liang-Barsky)."""
+    dx = p2[0] - p1[0]
+    dy = p2[1] - p1[1]
+    start, end = 0.0, 1.0
+    for direction, distance in (
+        (-dx, p1[0] - rect[0]),
+        (dx, rect[2] - p1[0]),
+        (-dy, p1[1] - rect[1]),
+        (dy, rect[3] - p1[1]),
+    ):
+        if abs(direction) < _EPS:
+            if distance < 0:
+                return 0.0
+            continue
+        ratio = distance / direction
+        if direction < 0:
+            if ratio > end:
+                return 0.0
+            start = max(start, ratio)
+        else:
+            if ratio < start:
+                return 0.0
+            end = min(end, ratio)
+    span = end - start
+    return ((dx * span) ** 2 + (dy * span) ** 2) ** 0.5
 
 
 def _loops_bounds(loops):
@@ -183,9 +220,13 @@ def _room_contours(doc, view):
             for boundary in loop:
                 points = list(boundary.GetCurve().Tessellate())
                 for i in range(len(points) - 1):
-                    segments.append(
-                        (room.Number, (points[i].X, points[i].Y), (points[i + 1].X, points[i + 1].Y))
+                    p1 = (points[i].X, points[i].Y)
+                    p2 = (points[i + 1].X, points[i + 1].Y)
+                    bounds = (
+                        min(p1[0], p2[0]), min(p1[1], p2[1]),
+                        max(p1[0], p2[0]), max(p1[1], p2[1]),
                     )
+                    segments.append((room.Number, p1, p2, bounds))
     return segments
 
 
@@ -265,29 +306,39 @@ class TagOverlapRule(QCRule):
         for view in views:
             walls = _wall_sections(doc, view, section_cache)
             contours = _room_contours(doc, view)
+            min_contour_ft = _MIN_CONTOUR_MM * view.Scale / _MM_PER_FT
 
             for index, (tag_view, tag_type, tag) in enumerate(entries):
                 box = boxes[index]
                 if box is None or tag_view.Id != view.Id:
                     continue
 
-                wall_count = sum(
-                    1 for _, loops, bounds in walls
-                    if _rects_touch(box, bounds) and _rect_hits_loops(box, loops)
+                box_area = (box[2] - box[0]) * (box[3] - box[1])
+                if box_area <= _EPS:
+                    continue
+
+                overlap = sum(
+                    _overlap_area(box, loops)
+                    for _, loops, bounds in walls
+                    if _rects_touch(box, bounds)
                 )
+                ratio = overlap / box_area
+
                 room_numbers = []
-                for number, p1, p2 in contours:
-                    if number not in room_numbers and _segment_hits_rect(p1, p2, box):
+                for number, p1, p2, bounds in contours:
+                    if number in room_numbers or not _rects_touch(box, bounds):
+                        continue
+                    if _segment_length_in_rect(p1, p2, box) >= min_contour_ft:
                         room_numbers.append(number)
 
-                if not wall_count and not room_numbers:
+                if ratio < _MIN_OVERLAP_RATIO and not room_numbers:
                     continue
 
                 overlaps = []
-                if wall_count:
-                    overlaps.append("{} mur(s)".format(wall_count))
+                if ratio >= _MIN_OVERLAP_RATIO:
+                    overlaps.append("un mur sur {:.0f}% de l'etiquette".format(ratio * 100))
                 if room_numbers:
-                    overlaps.append("contour {}".format(", ".join(room_numbers)))
+                    overlaps.append("le contour de {}".format(", ".join(sorted(room_numbers))))
 
                 issues.append(
                     QCIssue(
@@ -299,7 +350,7 @@ class TagOverlapRule(QCRule):
                             tag_type.label,
                             _tag_value(doc, tag, tag_type),
                             view.Name,
-                            ", ".join(overlaps),
+                            " et ".join(overlaps),
                         ),
                     )
                 )
